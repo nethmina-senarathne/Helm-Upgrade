@@ -1,0 +1,74 @@
+#!/bin/bash
+
+echo ""
+echo "💡 Welcome! This script will help you connect to an AKS cluster, view Helm app versions, and upgrade IFS Cloud."
+echo ""
+
+# Ask for cluster name
+read -p "👉 Please enter the AKS cluster name (example: abcd-dsk-aks): " CLUSTER_NAME
+
+# Switch kube context
+echo ""
+echo "🔄 Switching to cluster context: $CLUSTER_NAME ..."
+kubectl config use-context "$CLUSTER_NAME"
+
+if [ $? -ne 0 ]; then
+  echo "❌ Failed to switch context to '$CLUSTER_NAME'. Please check the cluster name and try again."
+  exit 1
+fi
+
+echo "✅ Successfully connected to '$CLUSTER_NAME'."
+
+# Run helm list
+echo ""
+echo "📋 Fetching Helm app versions and namespaces in this cluster..."
+helm list -A --output json | jq -r '.[] | "\(.app_version) \(.namespace)"'
+
+# Prompt user for version and namespace
+echo ""
+echo "👉 Please copy-paste a line from above (format: \"<version> <namespace>\")"
+read -p "Enter version and namespace: " IFSVERSION K8S_NAMESPACE
+
+echo ""
+echo "✅ You entered: Version = '$IFSVERSION'  Namespace = '$K8S_NAMESPACE'"
+echo ""
+
+# Run Helm upgrade (normal)
+echo "🚀 Starting Helm upgrade for IFS Cloud..."
+helm upgrade --install ifs-cloud helm/ifs-cloud \
+  --version "$IFSVERSION" \
+  --namespace "$K8S_NAMESPACE" \
+  --debug \
+  --values override_values.yml \
+  --reuse-values \
+  --timeout 15m
+
+if [ $? -ne 0 ]; then
+  echo "❌ Helm upgrade failed. Please review the above output for details."
+  exit 1
+fi
+
+# Ask if user wants to increase client service memory
+echo ""
+read -p "⚡ Do you want to increase the client service memory to 1500 MB? (yes/no): " CONFIRM
+
+if [[ "$CONFIRM" =~ ^[Yy][Ee][Ss]$ || "$CONFIRM" =~ ^[Yy]$ ]]; then
+  echo "🚀 Proceeding to increase client service memory..."
+  helm upgrade --install ifs-cloud helm/ifs-cloud \
+    --version "$IFSVERSION" \
+    --namespace "$K8S_NAMESPACE" \
+    --set ifsappclientservices.minMemory=1500 \
+    --reuse-values \
+    --timeout 15m
+
+  if [ $? -eq 0 ]; then
+    echo "✅ Client service memory increased and Helm upgrade completed successfully."
+  else
+    echo "❌ Failed to increase client service memory. Please check the logs above."
+  fi
+else
+  echo "ℹ️ Client service memory upgrade was skipped as per your choice."
+fi
+
+echo ""
+echo "🎉 Script completed. Thank you!"
